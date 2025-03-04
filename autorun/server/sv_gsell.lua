@@ -1,14 +1,14 @@
 local _P = FindMetaTable("Player")
-local TABLE_NAME = "gselldatabaser"
+local TABLE_NAME = "gsellitemdb"
 
 if not sql.TableExists(TABLE_NAME) then
     sql.Begin()
-        sql.Query("CREATE TABLE `" .. TABLE_NAME .. "` (id char(17), name varchar(255), count int, primary key(id, name))")
+        sql.Query("CREATE TABLE `" .. TABLE_NAME .. "` (id char(17), name varchar(255), count int, price int, primary key(id, name))")
     sql.Commit()
 end
 
 local inv = {}
-local testing = true
+local testing = false
 
 function _P:Init()
     self.inv = {} -- Only store ent name and count
@@ -19,7 +19,7 @@ function _P:Init()
 
     if res then
         for _, r in ipairs(res) do
-            local itemAdded = {r.name, ["count"] = r.count}
+            local itemAdded = {r.name, ["count"] = r.count, ["price"] = r.price}
             table.insert(self.inv, itemAdded)
         end
     end
@@ -51,19 +51,27 @@ function _P:RemoveItem(name, count)
     end
 end
 
+function _P:GetItemIndex(name)
+    for k, v in ipairs(self.inv) do
+        if v[1] == name then
+            return k
+        end 
+    end
+end
+
 -- Dont error check here, when the player sells at the NPC, the npc will calculate how much they can sell max. Check gsellent
 function _P:SellItem(name, count)
-    --local ent = ents.FindByName(name)
-    --local sellAmmt = ent.BasePrice
-    --local amt = sellAmmt * count
+    local index = self:GetItemIndex(name)
+    local sellAmmt = self.inv[index].price
+    local amt = sellAmmt * count
 
     self:RemoveItem(name, count)
 
-    --hook.Run("gBankAddMoney", sql.SQLStr(self:SteamID()), amt, self)
+    hook.Run("gBankAddMoney", self:SteamID(), amt, self)
 end
 
 --Error checking done before getting called
-function _P:AddItem(name)
+function _P:AddItem(name, price)
     for k, v in ipairs(self.inv) do
         if v[1] == name then
             v.count = v.count + 1
@@ -72,7 +80,7 @@ function _P:AddItem(name)
     end
 
     --If we havent found it in their inventory, then just add it.
-    table.insert(self.inv, {name, ["count"] = 1})
+    table.insert(self.inv, {name, ["count"] = 1, ["price"] = price})
 end
 
 function _P:PrintInv()
@@ -85,14 +93,12 @@ end
 --Error checking throws errors but saves correctly, For future there will be a
 --Select count statement, from what we expect vs what we actually have in database
 function saveItem(steamid, name, count)
-    print("Called Item")
     local qry = string.format("UPDATE %s SET count = %d where id = %s and name = '%s';", TABLE_NAME, count, steamid, name)
     local res = sql.Query(qry)
 end
 
-function saveNewItem(steamid, name, count)
-    print("Called New Item")
-    local qry = string.format("INSERT INTO %s (id, name, count) VALUES (%s, '%s', %d);", TABLE_NAME, steamid, name, count)
+function saveNewItem(steamid, name, count, price)
+    local qry = string.format("INSERT INTO %s (id, name, count, price) VALUES (%s, '%s', %d, %d);", TABLE_NAME, steamid, name, count, price)
     local res = sql.Query(qry)
 end
 
@@ -106,7 +112,7 @@ function _P:SaveInv()
         if exists then
             saveItem(steamid, v[1], v.count)
         else
-            saveNewItem(steamid, v[1], v.count)
+            saveNewItem(steamid, v[1], v.count, v.price)
         end
     end
 
@@ -119,7 +125,13 @@ net.Receive("gSellingInv", function(len, ply)
     net.Start("gOpenSellNPC")
     net.WriteTable(ply.inv)
     net.Send(ply)
+end)
 
+util.AddNetworkString("gSellAddEntity")
+net.Receive("gSellAddEntity", function(len, ply)
+    local ent = net.ReadEntity()
+    ply:AddItem(ent.PrintName, ent.BasePrice)
+    ent:Remove()
 end)
 
 hook.Add("PlayerInitialSpawn", "gSellInitInv", function(ply)
@@ -130,10 +142,12 @@ hook.Add("PlayerInitialSpawn", "gSellInitInv", function(ply)
     end
 end)
 
-concommand.Add("add", function(player, cmd, args)
-    player:AddItem(args[1])
-    player:PrintInv()
-end)
+if testing then
+    concommand.Add("add", function(player, cmd, args)
+        player:AddItem(args[1])
+        player:PrintInv()
+    end)
+end
 
 hook.Add("PlayerDisconnected", "gSellSavePlayer", function(ply)
     ply:SaveInv()

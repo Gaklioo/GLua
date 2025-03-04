@@ -1,17 +1,22 @@
-
+local pressedEnt = true
 
 hook.Add("PlayerButtonDown", "gSellEntAddToInv", function(ply, button)
-    if button == IN_USE and input.IsKeyDown(KEY_LCONTROL) then 
+    if button == KEY_E and input.IsKeyDown(KEY_LCONTROL) and pressedEnt then
         local tr = util.TraceLine({
             start = ply:EyePos(),
-            endpos = ply:EyePos() + ply:EyeAngles():Forward() * 5,
+            endpos = ply:EyePos() + ply:EyeAngles():Forward() * 100,
             filter = ply
         })
 
-        if IsValid(tr.Entity) and tr.Entity.BaseClass == "gsellent" then
-            ply:AddItem(tr.Entity.PrintName)
-        end
+        print(tr.Entity)
+        if IsValid(tr.Entity) and tr.Entity.Base == "gsellent" then
+            net.Start("gSellAddEntity")
+            net.WriteEntity(tr.Entity)
+            net.SendToServer()
 
+            pressedEnt = false 
+            timer.Simple(1, function() pressedEnt = true end)
+        end
     end
 end)
 
@@ -64,6 +69,8 @@ net.Receive("gOpenSellNPC", function()
                 net.Start("gSellingInv")
                 net.WriteTable(tab)
                 net.SendToServer()
+
+                panel:Close()
             end
 
             items:Add(frame)
