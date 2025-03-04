@@ -1,9 +1,9 @@
 local _P = FindMetaTable("Player")
-local TABLENAME = "gselldatabase"
+local TABLE_NAME = "gselldatabaser"
 
-if not sql.TableExists(TABLENAME) then
+if not sql.TableExists(TABLE_NAME) then
     sql.Begin()
-        sql.Query("CREATE TABLE `" .. TABLENAME .. "` (id char(17), name varchar(255), count int, primary key(id, name))")
+        sql.Query("CREATE TABLE `" .. TABLE_NAME .. "` (id char(17), name varchar(255), count int, primary key(id, name))")
     sql.Commit()
 end
 
@@ -13,13 +13,13 @@ local testing = true
 function _P:Init()
     self.inv = {} -- Only store ent name and count
 
-    local steamid = sql.SQLStr(self:SteamID(), true)
-    local qry = string.format("SELECT * FROM %s where id = %s", TABLENAME, steamid)
+    local steamid = sql.SQLStr(self:SteamID64(), true)
+    local qry = string.format("SELECT * FROM %s where id = %s;", TABLE_NAME, steamid)
     local res = sql.Query(qry)
 
     if res then
         for _, r in ipairs(res) do
-            local itemAdded = {r.name, r.count}
+            local itemAdded = {r.name, ["count"] = r.count}
             table.insert(self.inv, itemAdded)
         end
     end
@@ -30,13 +30,36 @@ function _P:GetItemCount(name)
     return self.inv[name].count
 end
 
+function _P:RemoveItem(name, count)
+    local index = 0
+    local amt = 0
+
+    for k, v in ipairs(self.inv) do
+        if v[1] == name then
+            index = k
+        end 
+    end
+
+    amt = self.inv[index].count - count
+
+    if amt == 0 then
+        local qry = string.format("DELETE FROM %s WHERE id = %s and name = '%s'", TABLE_NAME, self:SteamID64(), name)
+        sql.Query(qry)
+        table.remove(self.inv, index)
+    else
+        self.inv[index].count = amt
+    end
+end
+
 -- Dont error check here, when the player sells at the NPC, the npc will calculate how much they can sell max. Check gsellent
 function _P:SellItem(name, count)
-    local ent = ents.FindByName(name)
-    local sellAmmt = ent.BasePrice
-    local amt = sellAmmt * count
+    --local ent = ents.FindByName(name)
+    --local sellAmmt = ent.BasePrice
+    --local amt = sellAmmt * count
 
-    hook.Run("gBankAddMoney", self:SteamID(), amt, self)
+    self:RemoveItem(name, count)
+
+    --hook.Run("gBankAddMoney", sql.SQLStr(self:SteamID()), amt, self)
 end
 
 --Error checking done before getting called
@@ -58,69 +81,29 @@ function _P:PrintInv()
     end
 end
 
-function doesItemExist(steamid, name)
-    local qry = string.format("SELECT EXISTS (SELECT 1 FROM %s WHERE id = %s AND name = %s)", TABLENAME, steamid, name)
-
-    local res = sql.Query(qry)
-
-    if res then
-        return true 
-    else
-        return false 
-    end
-end
-
 --Two different functions to save items, as its easier to do in my mind
+--Error checking throws errors but saves correctly, For future there will be a
+--Select count statement, from what we expect vs what we actually have in database
 function saveItem(steamid, name, count)
-    local qry = string.format("UPDATE %s SET count = %s where id = %s and name = %s;", TABLENAME, sql.SQLStr(steamid, true), name, count)
+    print("Called Item")
+    local qry = string.format("UPDATE %s SET count = %d where id = %s and name = '%s';", TABLE_NAME, count, steamid, name)
     local res = sql.Query(qry)
-
-    if not res then
-        print("Error saving item:", sql.LastError())
-    else
-        print("Item saved successfully.")
-    end
 end
 
 function saveNewItem(steamid, name, count)
-    local qry = string.format("INSERT INTO %s (id, name, count) VALUES (%s, %s, %d);", TABLENAME, sql.SQLStr(steamid, true), name, count)
+    print("Called New Item")
+    local qry = string.format("INSERT INTO %s (id, name, count) VALUES (%s, '%s', %d);", TABLE_NAME, steamid, name, count)
     local res = sql.Query(qry)
-
-    if not res then
-        print("Error saving new item:", sql.LastError())
-    else
-        print("Item saved successfully.")
-    end
 end
 
 function _P:SaveInv()
-    local steamid = sql.SQLStr(self:SteamID(), true)
-    /*
-
-    local strQuery = string.format("SELECT EXISTS (SELECT 1 FROM `%s` WHERE id = '%s')", TABLENAME, steamid)
-    local exists = sql.Query(strQuery)
-
-    if exists then
-        for k, v in ipairs(self.inv) do
-            if doesItemExist(steamid, v[1]) then
-                saveItem(steamid, v[1], v.count)
-            else
-                saveNewItem(steamid, v[1], v.count)
-            end
-        end
-    else
-        for k, v in ipairs(self.inv) do
-            saveNewItem(steamid, v[1], v.count)
-        end
-    end
-
-    */
+    local steamid = sql.SQLStr(self:SteamID64(), true)
 
     for k, v in ipairs(self.inv) do
-        local strQuery = string.format("SELECT EXISTS (SELECT 1 FROM %s WHERE id = %s and name = %s)", TABLENAME, steamid, v[1])
-        local exists = sql.Query(strQuery)
+        local strQuery = string.format("SELECT * FROM %s WHERE id = %s and name = '%s';", TABLE_NAME, steamid, v[1])
+        local exists = sql.QueryValue(strQuery)
 
-        if exists and tonumber(exists[1]["exists"]) then
+        if exists then
             saveItem(steamid, v[1], v.count)
         else
             saveNewItem(steamid, v[1], v.count)
@@ -129,13 +112,22 @@ function _P:SaveInv()
 
 end
 
+util.AddNetworkString("gSellingInv")
+net.Receive("gSellingInv", function(len, ply)
+    local table = net.ReadTable()
+    ply:SellItem(table[1], table[2])
+    net.Start("gOpenSellNPC")
+    net.WriteTable(ply.inv)
+    net.Send(ply)
+
+end)
+
 hook.Add("PlayerInitialSpawn", "gSellInitInv", function(ply)
     ply:Init()
     if testing then
         ply:AddItem("hello")
+        ply:PrintInv()
     end
-
-    ply:PrintInv()
 end)
 
 concommand.Add("add", function(player, cmd, args)

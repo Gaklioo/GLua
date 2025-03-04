@@ -17,7 +17,6 @@ function ENT:Initialize()
 end
 
 function ENT:Use(act)
-    print("hi")
     net.Start("gOpenSellNPC")
     net.WriteTable(act.inv)
     net.Send(act)

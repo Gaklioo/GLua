@@ -41,17 +41,30 @@ net.Receive("gOpenSellNPC", function()
 
         for k, v in ipairs(curInv) do
             local frame = vgui.Create("DPanel", items)
-            frame:SetSize(50, 20)
+            frame:SetSize(items:GetWide(), 20)
             frame:Dock(TOP)
 
             local sell = vgui.Create("DButton", frame)
-            sell:SetText(v[1] .. " " .. v.count)
-            sell:Dock(TOP)
+            sell:SetSize(items:GetWide(), 20)
+            sell:SetText(v[1] .. " #In Inv = " .. v.count)
+            sell:Dock(FILL)
 
             local num = vgui.Create("DNumberWang", frame)
             num:Dock(RIGHT)
             num:SetSize(50, 20)
             num:SetMax(v.count)
+            num:SetMin(1)
+            num:SetValue(1)
+        
+            sell.DoClick = function()
+                local name = v[1]
+                local ammountToSell = num:GetValue()
+                local tab = {name, ammountToSell}
+                
+                net.Start("gSellingInv")
+                net.WriteTable(tab)
+                net.SendToServer()
+            end
 
             items:Add(frame)
 
